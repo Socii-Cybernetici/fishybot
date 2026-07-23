@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	// "encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -35,39 +35,39 @@ func main() {
 		log.Print("Received GET /\n")
 	})
 	srv_handler.HandleFunc("POST /submit", func(wr http.ResponseWriter, rq *http.Request) {
-		var p []byte = make([]byte, rq.ContentLength)
-		_, err := rq.Body.Read(p)
+		if rq.ContentLength == 0 {
+			wr.WriteHeader(400)
+			wr.Write([]byte("Request body is empty"))
+			log.Print("Request body is empty\n")
+			return
+		}
+		var data []byte = make([]byte, rq.ContentLength)
+		_, err := rq.Body.Read(data)
+		log.Print("REQUEST:" + string(data))
 		if err != nil {
 			wr.WriteHeader(400)
 			wr.Write([]byte("Failed to read request body; " + err.Error()))
-			log.Print("Could not read request body for this request\n")
+			log.Print("Could not read request body for this request;" + err.Error() + "\n")
 			return
 		}
-		var s = make([]byte, rq.ContentLength)
-		err = json.Unmarshal(p, &s)
-		if err != nil {
-			wr.WriteHeader(400)
-			wr.Write([]byte("Failed to parse request body; " + err.Error()))
-			log.Print("Could not parse request body for this request\n")
-			return
-		}
+		
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
-			log.Print("Could not reach discord api for this request\n")
+			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
 			return
 		}
-		_, err = discord_session.ChannelMessageSend(ch.ID, "Submission Received:\n"+string(p))
+		_, err = discord_session.ChannelMessageSend(ch.ID, "Submission Received:\n"+string(data))
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
-			log.Print("Could not reach discord api for this request\n")
+			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
 			return
 		}
 		wr.WriteHeader(200)
-		wr.Write([]byte("Submission received:\n" + string(p)))
-		log.Print("Submission received:\n" + string(p))
+		wr.Write([]byte("Submission received:\n" + string(data)))
+		log.Print("Submission received:\n" + string(data))
 	})
 	log.Printf("Listening on port %s", BOT_PORT)
 	err = srv.ListenAndServe()
