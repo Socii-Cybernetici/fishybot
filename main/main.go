@@ -44,13 +44,13 @@ func main() {
 		var data []byte = make([]byte, rq.ContentLength)
 		_, err := rq.Body.Read(data)
 		log.Print("REQUEST:" + string(data))
-		if err != nil {
-			wr.WriteHeader(400)
-			wr.Write([]byte("Failed to read request body; " + err.Error()))
-			log.Print("Could not read request body for this request;" + err.Error() + "\n")
-			return
-		}
-		
+		// if err != nil {
+		// 	wr.WriteHeader(400)
+		// 	wr.Write([]byte("Failed to read request body; " + err.Error()))
+		// 	log.Print("Could not read request body for this request;" + err.Error() + "\n")
+		// 	return
+		// }
+
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
 		if err != nil {
 			wr.WriteHeader(500)
