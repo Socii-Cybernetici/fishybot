@@ -34,11 +34,10 @@ func main() {
 		log.Print("Received GET /\n")
 	})
 	srv_handler.HandleFunc("POST /submit", func(wr http.ResponseWriter, rq *http.Request) {
-		var p []byte
+		var p []byte = make([]byte, rq.ContentLength)
 		_, err := rq.Body.Read(p)
 		if err != nil {
 			wr.WriteHeader(500)
-
 		}
 
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
