@@ -9,10 +9,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const nora_user_id string = "976576169325522994"
-const threespeed_user_id string = "489166470589448220"
-const phxie_user_id string = "362297684742373386"
-
 func main() {
 	err := godotenv.Load(".env")
 	if err != nil {
@@ -45,7 +41,7 @@ func main() {
 
 		}
 
-		ch, err := discord_session.UserChannelCreate(threespeed_user_id)
+		ch, err := discord_session.UserChannelCreate(489166470589448220)
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
