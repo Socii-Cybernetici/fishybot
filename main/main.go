@@ -41,7 +41,7 @@ func main() {
 
 		}
 
-		ch, err := discord_session.UserChannelCreate(489166470589448220)
+		ch, err := discord_session.UserChannelCreate("489166470589448220")
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
