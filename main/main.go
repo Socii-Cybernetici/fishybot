@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -37,9 +38,19 @@ func main() {
 		var p []byte = make([]byte, rq.ContentLength)
 		_, err := rq.Body.Read(p)
 		if err != nil {
-			wr.WriteHeader(500)
+			wr.WriteHeader(400)
+			wr.Write([]byte("Failed to read request body; " + err.Error()))
+			log.Print("Could not read request body for this request\n")
+			return
 		}
-
+		var s = make([]byte, rq.ContentLength)
+		err = json.Unmarshal(p, &s)
+		if err != nil {
+			wr.WriteHeader(400)
+			wr.Write([]byte("Failed to parse request body; " + err.Error()))
+			log.Print("Could not parse request body for this request\n")
+			return
+		}
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
 		if err != nil {
 			wr.WriteHeader(500)
