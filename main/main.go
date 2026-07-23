@@ -51,7 +51,23 @@ func main() {
 		// 	return
 		// }
 
+		/* 3speed */
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
+		if err != nil {
+			wr.WriteHeader(500)
+			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
+			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
+			return
+		}
+		_, err = discord_session.ChannelMessageSend(ch.ID, "Submission Received:\n"+string(data))
+		if err != nil {
+			wr.WriteHeader(500)
+			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
+			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
+			return
+		}
+		/* Nora */
+		ch, err = discord_session.UserChannelCreate("976576169325522994")
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
