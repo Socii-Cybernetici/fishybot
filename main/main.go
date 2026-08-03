@@ -1,10 +1,12 @@
 package main
 
 import (
-	// "encoding/json"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+
+	// "golang.org/x/crypto/nacl/auth"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -29,29 +31,25 @@ func main() {
 		Addr:    ":" + BOT_PORT,
 		Handler: srv_handler,
 	}
-	srv_handler.HandleFunc("GET /", func(wr http.ResponseWriter, rq *http.Request) {
-		wr.WriteHeader(200)
-		wr.Write([]byte("nothing to see here; use: POST /submit\n"))
-		log.Print("Received GET /\n")
-	})
+	/* fishy.best endpoints */
 	srv_handler.HandleFunc("POST /submit", func(wr http.ResponseWriter, rq *http.Request) {
-		if rq.ContentLength == 0 {
-			wr.WriteHeader(400)
-			wr.Write([]byte("Request body is empty"))
-			log.Print("Request body is empty\n")
-			return
-		}
 		var data []byte = make([]byte, rq.ContentLength)
 		_, err := rq.Body.Read(data)
-		log.Print("REQUEST:" + string(data))
-		// if err != nil {
-		// 	wr.WriteHeader(400)
-		// 	wr.Write([]byte("Failed to read request body; " + err.Error()))
-		// 	log.Print("Could not read request body for this request;" + err.Error() + "\n")
-		// 	return
-		// }
-
-		/* 3speed */
+		if err != nil {
+			wr.WriteHeader(500)
+		}
+		log.Print("REQUEST BODY: " + string(data))
+		values := make(map[string]string)
+		err = json.Unmarshal(data, &values)
+		if err != nil {
+			wr.WriteHeader(300)
+			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
+			log.Print("Failed to parse JSON\n")
+			return
+		}
+		log.Print("USERNAME: " + values["username"])
+		log.Print("ACCESS CODE: " + values["code"])
+		log.Print("SSH PUBLIC KEY: " + values["pubkey"])
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
 		if err != nil {
 			wr.WriteHeader(500)
@@ -59,7 +57,11 @@ func main() {
 			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
 			return
 		}
-		_, err = discord_session.ChannelMessageSend(ch.ID, "Submission Received:\n"+string(data))
+		_, err = discord_session.ChannelMessageSend(ch.ID,
+			"***Submission Received***\n"+
+				"Username: "+values["username"]+"\n"+
+				"Access Code: "+values["code"]+"\n"+
+				"SSH Public Key:\n"+values["pubkey"])
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
@@ -85,6 +87,7 @@ func main() {
 		wr.Write([]byte("Submission received:\n" + string(data)))
 		log.Print("Submission received:\n" + string(data))
 	})
+	/* discord interaction endpoints */
 	log.Printf("Listening on port %s", BOT_PORT)
 	err = srv.ListenAndServe()
 	log.Fatal(err.Error())

@@ -31,5 +31,5 @@ go.work.sum
 # .idea/
 # .vscode/
 
-web-test/*
+web-testing/*
 main
