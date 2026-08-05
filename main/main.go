@@ -76,7 +76,11 @@ func main() {
 			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
 			return
 		}
-		_, err = discord_session.ChannelMessageSend(ch.ID, "Submission Received:\n"+string(data))
+		_, err = discord_session.ChannelMessageSend(ch.ID,
+			"***Submission Received***\n"+
+				"Username: "+values["username"]+"\n"+
+				"Access Code: "+values["code"]+"\n"+
+				"SSH Public Key:\n"+values["pubkey"])
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
