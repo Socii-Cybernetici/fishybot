@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	// "golang.org/x/crypto/nacl/auth"
-
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
 )
@@ -42,7 +40,7 @@ func main() {
 		values := make(map[string]string)
 		err = json.Unmarshal(data, &values)
 		if err != nil {
-			wr.WriteHeader(300)
+			wr.WriteHeader(400)
 			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
 			log.Print("Failed to parse JSON\n")
 			return
@@ -92,6 +90,10 @@ func main() {
 		log.Print("Submission received:\n" + string(data))
 	})
 	/* discord interaction endpoints */
+	srv_handler.HandleFunc("POST /discord-interactions", func(wr http.ResponseWriter, rq *http.Request) {
+		log.Print("Recerived interaction\n")
+	})
+	/* Server Init */
 	log.Printf("Listening on port %s", BOT_PORT)
 	err = srv.ListenAndServe()
 	log.Fatal(err.Error())
