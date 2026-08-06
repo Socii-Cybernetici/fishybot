@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 
+	// "golang.org/x/crypto/nacl/auth"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
 )
@@ -35,6 +37,8 @@ func main() {
 		_, err := rq.Body.Read(data)
 		if err != nil {
 			wr.WriteHeader(500)
+			wr.Write([]byte("Internal I/O error with request"))
+			log.Print("Failed to read request " + err.Error())
 		}
 		log.Print("REQUEST BODY: " + string(data))
 		values := make(map[string]string)
@@ -91,7 +95,8 @@ func main() {
 	})
 	/* discord interaction endpoints */
 	srv_handler.HandleFunc("POST /discord-interactions", func(wr http.ResponseWriter, rq *http.Request) {
-		log.Print("Recerived interaction\n")
+		log.Print("Received interaction\n")
+
 	})
 	/* Server Init */
 	log.Printf("Listening on port %s", BOT_PORT)
