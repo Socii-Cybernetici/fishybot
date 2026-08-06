@@ -41,17 +41,17 @@ func main() {
 			log.Print("Failed to read request " + err.Error())
 		}
 		log.Print("REQUEST BODY: " + string(data))
-		var values map[string]string = make(map[string]string)
-		err = json.Unmarshal(data, &values)
+		var req_values map[string]string = make(map[string]string)
+		err = json.Unmarshal(data, &req_values)
 		if err != nil {
 			wr.WriteHeader(400)
 			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
 			log.Print("Failed to parse JSON\n")
 			return
 		}
-		log.Print("USERNAME: " + values["username"])
-		log.Print("ACCESS CODE: " + values["code"])
-		log.Print("SSH PUBLIC KEY: " + values["pubkey"])
+		log.Print("USERNAME: " + req_values["username"])
+		log.Print("ACCESS CODE: " + req_values["code"])
+		log.Print("SSH PUBLIC KEY: " + req_values["pubkey"])
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
 		if err != nil {
 			wr.WriteHeader(500)
@@ -61,9 +61,9 @@ func main() {
 		}
 		_, err = discord_session.ChannelMessageSend(ch.ID,
 			"***Submission Received***\n"+
-				"Username: "+values["username"]+"\n"+
-				"Access Code: "+values["code"]+"\n"+
-				"SSH Public Key:\n"+values["pubkey"])
+				"Username: "+req_values["username"]+"\n"+
+				"Access Code: "+req_values["code"]+"\n"+
+				"SSH Public Key:\n"+req_values["pubkey"])
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
@@ -80,9 +80,9 @@ func main() {
 		}
 		_, err = discord_session.ChannelMessageSend(ch.ID,
 			"***Submission Received***\n"+
-				"Username: "+values["username"]+"\n"+
-				"Access Code: "+values["code"]+"\n"+
-				"SSH Public Key:\n"+values["pubkey"])
+				"Username: "+req_values["username"]+"\n"+
+				"Access Code: "+req_values["code"]+"\n"+
+				"SSH Public Key:\n"+req_values["pubkey"])
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
@@ -96,7 +96,35 @@ func main() {
 	/* discord interaction endpoints */
 	srv_handler.HandleFunc("POST /discord-interactions", func(wr http.ResponseWriter, rq *http.Request) {
 		log.Print("Received discord interaction\n")
-		
+		var data []byte = make([]byte, rq.ContentLength)
+		_, err := rq.Body.Read(data)
+		if err != nil {
+			wr.WriteHeader(500)
+			wr.Write([]byte("Internal I/O error with request"))
+			log.Print("Failed to read request " + err.Error())
+		}
+		var req_values map[string]string = make(map[string]string)
+		err = json.Unmarshal(data, &req_values)
+		if err != nil {
+			wr.WriteHeader(400)
+			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
+			log.Print("Failed to parse JSON\n")
+			return
+		}
+		switch req_values["type"] {
+		case "1":
+			log.Print("This is a ping request\n")
+			// ret_values := make(map[string]int)
+			// ret_values["type"] = 1
+			// ret_json, err := json.Marshal(ret_values)
+			// if err != nil {
+			// 	wr.WriteHeader(500)
+			// 	wr.Write([]byte("Failed to marshal JSON; " + err.Error()))
+			// }
+			// wr.WriteHeader(200)
+			// wr.Write(ret_json)
+			wr.Write([]byte("{\"type\": 1}"))
+		}
 	})
 	/* Server Init */
 	log.Printf("Listening on port %s", BOT_PORT)
