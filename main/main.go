@@ -41,7 +41,7 @@ func main() {
 			log.Print("Failed to read request " + err.Error())
 		}
 		log.Print("REQUEST BODY: " + string(data))
-		values := make(map[string]string)
+		var values map[string]string = make(map[string]string)
 		err = json.Unmarshal(data, &values)
 		if err != nil {
 			wr.WriteHeader(400)
@@ -95,8 +95,8 @@ func main() {
 	})
 	/* discord interaction endpoints */
 	srv_handler.HandleFunc("POST /discord-interactions", func(wr http.ResponseWriter, rq *http.Request) {
-		log.Print("Received interaction\n")
-
+		log.Print("Received discord interaction\n")
+		
 	})
 	/* Server Init */
 	log.Printf("Listening on port %s", BOT_PORT)
