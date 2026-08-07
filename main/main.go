@@ -1,15 +1,15 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 
-	// "golang.org/x/crypto/nacl/auth"
-
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/ed25519"
 )
 
 func main() {
@@ -19,6 +19,7 @@ func main() {
 	}
 	var BOT_PORT string = os.Getenv("BOT_PORT")
 	var BOT_TOKEN string = os.Getenv("DISCORD_BOT_TOKEN")
+	var BOT_PUBKEY_HEX string = os.Getenv("DISCORD_BOT_PUBKEY")
 
 	discord_session, err := discordgo.New("Bot " + BOT_TOKEN)
 	if err != nil {
@@ -33,16 +34,16 @@ func main() {
 	}
 	/* fishy.best endpoints */
 	srv_handler.HandleFunc("POST /submit", func(wr http.ResponseWriter, rq *http.Request) {
-		var data []byte = make([]byte, rq.ContentLength)
-		_, err := rq.Body.Read(data)
+		var body []byte = make([]byte, rq.ContentLength)
+		_, err := rq.Body.Read(body)
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Internal I/O error with request"))
 			log.Print("Failed to read request " + err.Error())
 		}
-		log.Print("REQUEST BODY: " + string(data))
+		log.Print("REQUEST BODY: " + string(body))
 		var req_values map[string]string = make(map[string]string)
-		err = json.Unmarshal(data, &req_values)
+		err = json.Unmarshal(body, &req_values)
 		if err != nil {
 			wr.WriteHeader(400)
 			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
@@ -89,26 +90,37 @@ func main() {
 			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
 			return
 		}
-		wr.Write([]byte("Submission received:\n" + string(data)))
-		log.Print("Submission received:\n" + string(data))
+		wr.Write([]byte("Submission received:\n" + string(body)))
+		log.Print("Submission received:\n" + string(body))
 	})
 	/* discord interaction endpoints */
 	srv_handler.HandleFunc("POST /discord-interactions", func(wr http.ResponseWriter, rq *http.Request) {
-		log.Print("Received discord interaction\n")
-		var data []byte = make([]byte, rq.ContentLength)
-		_, err := rq.Body.Read(data)
+		log.Print("Received discord interaction, checking cryptographic signature...\n")
+		signature := rq.Header["X-Signature-Ed25519"][0]
+		timestamp := rq.Header["X-Signature-Timestamp"][0]
+		var body []byte = make([]byte, rq.ContentLength)
+		_, err := rq.Body.Read(body)
 		if err != nil {
 			wr.WriteHeader(500)
-			wr.Write([]byte("Internal I/O error with request"))
 			log.Print("Failed to read request " + err.Error())
 			return
 		}
-		var req_values map[string]string = make(map[string]string)
-		err = json.Unmarshal(data, &req_values)
+		BOT_PUBKEY_BYTES, err := hex.DecodeString(BOT_PUBKEY_HEX)
 		if err != nil {
-			wr.WriteHeader(400)
-			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
-			log.Print("Failed to parse JSON\n")
+			wr.WriteHeader(401)
+			log.Println("Invalid hex encoding of bot public key; " + err.Error())
+			return
+		}
+		if !ed25519.Verify(BOT_PUBKEY_BYTES, append([]byte(timestamp), body...), []byte(signature)) {
+			wr.WriteHeader(401)
+			log.Println("Failed cryptographic signature check, ignoring request")
+			return
+		}
+		var req_values map[string]string = make(map[string]string)
+		err = json.Unmarshal(body, &req_values)
+		if err != nil {
+			wr.WriteHeader(401)
+			log.Println("Failed to parse JSON " + err.Error())
 			return
 		}
 		switch req_values["type"] {
