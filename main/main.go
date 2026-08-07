@@ -89,7 +89,6 @@ func main() {
 			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
 			return
 		}
-		wr.WriteHeader(200)
 		wr.Write([]byte("Submission received:\n" + string(data)))
 		log.Print("Submission received:\n" + string(data))
 	})
@@ -102,6 +101,7 @@ func main() {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Internal I/O error with request"))
 			log.Print("Failed to read request " + err.Error())
+			return
 		}
 		var req_values map[string]string = make(map[string]string)
 		err = json.Unmarshal(data, &req_values)
