@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,7 +20,7 @@ func main() {
 	}
 	var BOT_PORT string = os.Getenv("BOT_PORT")
 	var BOT_TOKEN string = os.Getenv("DISCORD_BOT_TOKEN")
-	var BOT_PUBKEY_HEX string = os.Getenv("DISCORD_BOT_PUBKEY")
+	var BOT_PUBKEY_HEX string = os.Getenv("DISCORD_BOT_PUBKEY_HEX")
 
 	discord_session, err := discordgo.New("Bot " + BOT_TOKEN)
 	if err != nil {
@@ -42,17 +43,17 @@ func main() {
 			log.Print("Failed to read request " + err.Error())
 		}
 		log.Print("REQUEST BODY: " + string(body))
-		var req_values map[string]string = make(map[string]string)
-		err = json.Unmarshal(body, &req_values)
+		var request_values map[string]string = make(map[string]string)
+		err = json.Unmarshal(body, &request_values)
 		if err != nil {
 			wr.WriteHeader(400)
 			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
 			log.Print("Failed to parse JSON\n")
 			return
 		}
-		log.Print("USERNAME: " + req_values["username"])
-		log.Print("ACCESS CODE: " + req_values["code"])
-		log.Print("SSH PUBLIC KEY: " + req_values["pubkey"])
+		log.Print("USERNAME: " + request_values["username"])
+		log.Print("ACCESS CODE: " + request_values["code"])
+		log.Print("SSH PUBLIC KEY: " + request_values["pubkey"])
 		ch, err := discord_session.UserChannelCreate("489166470589448220")
 		if err != nil {
 			wr.WriteHeader(500)
@@ -62,9 +63,9 @@ func main() {
 		}
 		_, err = discord_session.ChannelMessageSend(ch.ID,
 			"***Submission Received***\n"+
-				"Username: "+req_values["username"]+"\n"+
-				"Access Code: "+req_values["code"]+"\n"+
-				"SSH Public Key:\n"+req_values["pubkey"])
+				"Username: "+request_values["username"]+"\n"+
+				"Access Code: "+request_values["code"]+"\n"+
+				"SSH Public Key:\n"+request_values["pubkey"])
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
@@ -81,9 +82,9 @@ func main() {
 		}
 		_, err = discord_session.ChannelMessageSend(ch.ID,
 			"***Submission Received***\n"+
-				"Username: "+req_values["username"]+"\n"+
-				"Access Code: "+req_values["code"]+"\n"+
-				"SSH Public Key:\n"+req_values["pubkey"])
+				"Username: "+request_values["username"]+"\n"+
+				"Access Code: "+request_values["code"]+"\n"+
+				"SSH Public Key:\n"+request_values["pubkey"])
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
@@ -94,37 +95,50 @@ func main() {
 		log.Print("Submission received:\n" + string(body))
 	})
 	/* discord interaction endpoints */
+
+	// discord_session.InteractionRespond()
+
 	srv_handler.HandleFunc("POST /discord-interactions", func(wr http.ResponseWriter, rq *http.Request) {
 		log.Print("Received discord interaction, checking cryptographic signature...\n")
-		signature := rq.Header["X-Signature-Ed25519"][0]
-		timestamp := rq.Header["X-Signature-Timestamp"][0]
+		signature_hex := rq.Header.Get("X-Signature-Ed25519")
+		timestamp := rq.Header.Get("X-Signature-Timestamp")
 		var body []byte = make([]byte, rq.ContentLength)
 		_, err := rq.Body.Read(body)
-		if err != nil {
+		if err != nil && err.Error() != "EOF" {
 			wr.WriteHeader(500)
-			log.Print("Failed to read request " + err.Error())
+			log.Println("Failed to read request; " + err.Error())
 			return
 		}
-		BOT_PUBKEY_BYTES, err := hex.DecodeString(BOT_PUBKEY_HEX)
+		BOT_PUBKEY, err := hex.DecodeString(BOT_PUBKEY_HEX)
 		if err != nil {
 			wr.WriteHeader(401)
-			log.Println("Invalid hex encoding of bot public key; " + err.Error())
+			log.Println("Invalid bot public key encoding; " + err.Error())
 			return
 		}
-		if !ed25519.Verify(BOT_PUBKEY_BYTES, append([]byte(timestamp), body...), []byte(signature)) {
+		signature, err := hex.DecodeString(signature_hex)
+		if err != nil {
+			wr.WriteHeader(401)
+			log.Println("Invalid signature encoding; " + err.Error())
+			return
+		}
+		message := []byte(fmt.Sprintf("%s%s", timestamp, string(body)))
+		if !ed25519.Verify(BOT_PUBKEY, message, signature) {
 			wr.WriteHeader(401)
 			log.Println("Failed cryptographic signature check, ignoring request")
 			return
+		} else {
+			log.Println("Succeeded cryptographic signature check, proceeding...")
 		}
-		var req_values map[string]string = make(map[string]string)
-		err = json.Unmarshal(body, &req_values)
+		log.Println("Raw body: " + string(body))
+		request_values := make(map[string]any)
+		err = json.Unmarshal(body, &request_values)
 		if err != nil {
 			wr.WriteHeader(401)
-			log.Println("Failed to parse JSON " + err.Error())
+			log.Println("Failed to parse JSON; " + err.Error())
 			return
 		}
-		switch req_values["type"] {
-		case "1":
+		switch request_values["type"] {
+		case 1:
 			log.Print("This is a ping request\n")
 			// ret_values := make(map[string]int)
 			// ret_values["type"] = 1
