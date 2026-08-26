@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 
 	dg "github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -15,9 +16,10 @@ import (
 
 var PENDING_REGISTRATIONS map[string][2]string = make(map[string][2]string)
 
-const pending_file_path string = "./pending.dat"
-
 func main() {
+	var pending_file_path string = os.Args[2]
+	var mkuser_script_path string = os.Args[3]
+	/* Load environment variables */
 	err := godotenv.Load(os.Args[1])
 	if err != nil {
 		log.Fatal(err)
@@ -27,13 +29,15 @@ func main() {
 	var BOT_ID string = os.Getenv("DISCORD_BOT_ID")
 	var SPEED3_UID string = os.Getenv("3SPEED_UID")
 	var NORA_UID string = os.Getenv("NORA_UID")
+	var ADMIN_BROADCAST_UIDS = [2]string{SPEED3_UID, NORA_UID}
+
 	discord_session, err := dg.New("Bot " + BOT_TOKEN)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	/* Open file of pending users and read into PENDING_REGISTRATIONS set */
-	pending_file, err := os.OpenFile(pending_file_path, os.O_RDWR|os.O_CREATE, 0644)
+	pending_file, err := os.OpenFile(pending_file_path, os.O_RDWR|os.O_CREATE, 0660)
 	if err != nil {
 		err2 := send_message(discord_session, SPEED3_UID, "File i/o error: "+err.Error())
 		if err2 != nil {
@@ -46,67 +50,59 @@ func main() {
 	for userinfo, err := reader.ReadString('\n'); err != io.EOF; userinfo, err = reader.ReadString('\n') {
 		var code_and_key [2]string
 		var username string
-		fmt.Sscanf(userinfo, "%s\x00%s\x00%s\n", &username, &code_and_key[0], &code_and_key[1])
+		fmt.Sscanf(userinfo, "%s %s %s\n", &username, &code_and_key[0], &code_and_key[1])
 		PENDING_REGISTRATIONS[username] = code_and_key
 	}
 
-	var srv_handler *http.ServeMux = http.NewServeMux()
-	var srv http.Server = http.Server{
-		Addr:    ":" + BOT_PORT,
-		Handler: srv_handler,
-	}
 	/* Handle submission from fishy.best */
+	var srv_handler *http.ServeMux = http.NewServeMux()
 	srv_handler.HandleFunc("POST /submit", func(wr http.ResponseWriter, rq *http.Request) {
 		var body []byte = make([]byte, rq.ContentLength)
-		_, err := rq.Body.Read(body)
-		if err != nil {
+		nbytes, err := rq.Body.Read(body)
+		if (err != nil || nbytes != int(rq.ContentLength)) && err != io.EOF {
 			wr.WriteHeader(500)
-			wr.Write([]byte("Internal I/O error with request"))
-			log.Print("Failed to read request " + err.Error())
+			wr.Write([]byte("Internal I/O error with request: " + err.Error()))
+			log.Println("Failed to read request " + err.Error())
+			return
 		}
-		log.Print("REQUEST BODY: " + string(body))
+		log.Println("REQUEST BODY: " + string(body))
 		var request_values map[string]string = make(map[string]string)
 		err = json.Unmarshal(body, &request_values)
 		if err != nil {
-			wr.WriteHeader(400)
+			wr.WriteHeader(300)
 			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
-			log.Print("Failed to parse JSON\n")
+			log.Println("Failed to parse JSON: " + err.Error())
 			return
 		}
-		log.Print("----Successful Submission----")
-		log.Print("USERNAME: " + request_values["username"])
-		log.Print("ACCESS CODE: " + request_values["code"])
-		log.Print("SSH PUBLIC KEY: " + request_values["pubkey"])
-		/* Add user to PENDING_REGISTRATIONS set */
+		log.Println("----Successful Submission----")
+		log.Println("USERNAME: " + request_values["username"])
+		log.Println("ACCESS CODE: " + request_values["code"])
+		log.Println("SSH PUBLIC KEY: " + request_values["pubkey"])
 		PENDING_REGISTRATIONS[request_values["username"]] = [2]string{request_values["code"], request_values["pubkey"]}
-		log.Print("Added user " + request_values["username"] + " to pending list")
+		log.Println("Added user " + request_values["username"] + " to pending list")
 		err = write_pending_to_file(pending_file)
-		/* 3speed */
-		err = send_message(discord_session, SPEED3_UID,
-			"***Submission Received***\n"+
-				"Username: "+request_values["username"]+"\n"+
-				"Access Code: "+request_values["code"]+"\n"+
-				"SSH Public Key:\n"+request_values["pubkey"])
 		if err != nil {
-			wr.WriteHeader(500)
-			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
-			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
+			err2 := send_message(discord_session, SPEED3_UID, "File i/o error: "+err.Error())
+			if err2 != nil {
+				log.Println(err2)
+			}
 			return
 		}
-		/* Nora */
-		err = send_message(discord_session, NORA_UID,
+		err = broadcast_event(
+			discord_session,
 			"***Submission Received***\n"+
 				"Username: "+request_values["username"]+"\n"+
 				"Access Code: "+request_values["code"]+"\n"+
-				"SSH Public Key:\n"+request_values["pubkey"])
+				"SSH Public Key:\n"+request_values["pubkey"],
+			ADMIN_BROADCAST_UIDS)
 		if err != nil {
 			wr.WriteHeader(500)
 			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
-			log.Print("Could not reach discord api for this request;" + err.Error() + "\n")
+			log.Println("Could not reach discord api for this request;" + err.Error())
 			return
 		}
 		wr.Write([]byte("Submission received:\n" + string(body)))
-		log.Print("Submission received:\n" + string(body))
+		log.Println("Submission received:\n" + string(body))
 	})
 
 	/* Initialize bot slash commands */
@@ -134,66 +130,208 @@ func main() {
 		ID:            "2",
 		Type:          dg.ChatApplicationCommand,
 		ApplicationID: BOT_ID,
-		Name:          "admit",
-		Description:   "Admit a currently pending user",
+		Name:          "info",
+		Description:   "Show info for an applicant",
 		Options: []*dg.ApplicationCommandOption{
 			{
-				Type:        dg.ApplicationCommandOptionNumber,
-				Name:        "index",
-				Description: "index of user to select",
+				Type:        dg.ApplicationCommandOptionString,
+				Name:        "username",
+				Description: "username of user to select",
+			},
+		},
+	})
+	if err != nil {
+		log.Fatal("Failed to register info command: " + err.Error())
+	}
+	_, err = discord_session.ApplicationCommandCreate(BOT_ID, "", &dg.ApplicationCommand{
+		ID:            "2",
+		Type:          dg.ChatApplicationCommand,
+		ApplicationID: BOT_ID,
+		Name:          "admit",
+		Description:   "Admit a currently pending applicant",
+		Options: []*dg.ApplicationCommandOption{
+			{
+				Type:        dg.ApplicationCommandOptionString,
+				Name:        "username",
+				Description: "username of user to select",
 			},
 		},
 	})
 	if err != nil {
 		log.Fatal("Failed to register admit command: " + err.Error())
 	}
-	/* Handle discord interactions from slash commands */
+	/* Handle discord gateway interactions from slash commands */
 	discord_session.AddHandler(func(s *dg.Session, i *dg.InteractionCreate) {
 		switch i.Interaction.Type {
 		case dg.InteractionApplicationCommand:
 			data := i.Interaction.ApplicationCommandData()
 			switch data.Name {
 			case "help":
-				s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+				err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 					Type: dg.InteractionResponseChannelMessageWithSource,
 					Data: &dg.InteractionResponseData{
 						Content: "List of commands:\n" +
 							"/help - show this message\n" +
 							"/pending - list pending users\n" +
-							"/admit N - admit pending user with index N",
+							"/info USERNAME - show info for a user\n" +
+							"/admit USERNAME - admit pending user",
 					},
 				})
+				if err != nil {
+					log.Println("Failed to respond to help command: ", err.Error())
+				}
 				return
 			case "pending":
-				// usernames are probably <9 characters on average, plus boilerplate characters
-				content := make([]byte, 14*len(PENDING_REGISTRATIONS))
+				// usernames are probably <12 characters on average, plus boilerplate characters
+				content := make([]byte, 16*len(PENDING_REGISTRATIONS))
 				j := 1
 				for username := range PENDING_REGISTRATIONS {
 					content = append(content, fmt.Sprintf("%d. %s\n", j, username)...)
 					j++
 				}
-				s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+				err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 					Type: dg.InteractionResponseChannelMessageWithSource,
 					Data: &dg.InteractionResponseData{
 						Content: fmt.Sprintf("List of pending users:\n %s", content),
 					},
 				})
+				if err != nil {
+					log.Println("Failed to respond to pending command: ", err.Error())
+				}
+				return
+			case "info":
+				if data.Options == nil {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "No username provided!",
+						},
+					})
+					if err != nil {
+						log.Println("Failed to report malformed info command: ", err.Error())
+					}
+					return
+				}
+				_username := data.GetOption("username").Value
+				username, ok := _username.(string)
+				if !ok {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "Invalid option type!",
+						},
+					})
+					if err != nil {
+						log.Println("Failed to report malformed info command: ", err.Error())
+					}
+					return
+				}
+				if _, ok := PENDING_REGISTRATIONS[username]; !ok {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "User not in pending list!",
+						},
+					})
+					return
+				}
+				if err != nil {
+					log.Println("Failed to respond to admission command failure: ", err.Error())
+				}
+				err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+					Type: dg.InteractionResponseChannelMessageWithSource,
+					Data: &dg.InteractionResponseData{
+						Content: fmt.Sprintf("Username: %s\nAccess Code: %s\nSSH Public Key:\n%s",
+							username,
+							PENDING_REGISTRATIONS[username][0],
+							PENDING_REGISTRATIONS[username][1],
+						),
+					},
+				})
+				if err != nil {
+					log.Println("Failed to respond to info command: ", err.Error())
+				}
 				return
 			case "admit":
+				if data.Options == nil {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "No username provided!",
+						},
+					})
+					if err != nil {
+						log.Println("Failed to report malformed admission command: ", err.Error())
+					}
+					return
+				}
+				_username := data.GetOption("username").Value
+				username, ok := _username.(string)
+				if !ok {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "Invalid option type!",
+						},
+					})
+					if err != nil {
+						log.Println("Failed to report malformed admission command: ", err.Error())
+					}
+					return
+				}
+				if _, ok := PENDING_REGISTRATIONS[username]; !ok {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "User not in pending list!",
+						},
+					})
+					return
+				}
+				if err != nil {
+					log.Println("Failed to respond to admission command failure: ", err.Error())
+				}
+				/*
+					Here we are going to somehow call the script to onboard a user...
+				*/
+				script := exec.Command(mkuser_script_path, username, PENDING_REGISTRATIONS[username][1])
+				// TODO: FIX FILE CREATION PERMISSIONS (SUDO?)
+				err = script.Run()
+				if err != nil {
+					log.Println("User onboarding script failed: " + err.Error())
+					err2 := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "User onboarding script failed: " + err.Error() + ". See server backend for details.",
+						},
+					})
+					if err2 != nil {
+						log.Println("Failed to report failed onboarding script: ", err.Error())
+					}
+					return
+				}
+				// At this point we have guaranteed success
+				delete(PENDING_REGISTRATIONS, username)
+				write_pending_to_file(pending_file)
+				err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+					Type: dg.InteractionResponseChannelMessageWithSource,
+					Data: &dg.InteractionResponseData{
+						Content: fmt.Sprintf("User %s successfully admitted by command!", username),
+					},
+				})
+				if err != nil {
+					log.Println("Failed to respond to admit command: ", err.Error())
+				}
+				err = broadcast_event(
+					discord_session,
+					fmt.Sprintf("User \"%s\" admitted by %s!", username, i.Interaction.User.Username),
+					ADMIN_BROADCAST_UIDS)
+				if err != nil {
+					log.Println("Failed to broadcast admission event" + err.Error())
+				}
 				return
 			}
 
-		}
-	})
-	/* Handle other discord interactions */
-	discord_session.AddHandler(func(s *dg.Session, m *dg.MessageCreate) {
-		if m.Author.Username == "Fishy" {
-			return
-		}
-		err := send_message(s, m.Author.ID, "Message received in bot DM: "+m.Message.Content+"\n"+"From: "+m.Author.Username)
-		if err != nil {
-			log.Println("Failed to send message in response to message event; " + err.Error())
-			return
 		}
 	})
 
@@ -202,6 +340,10 @@ func main() {
 		log.Fatal(err.Error())
 	}
 
+	var srv http.Server = http.Server{
+		Addr:    ":" + BOT_PORT,
+		Handler: srv_handler,
+	}
 	log.Printf("Listening on port %s", BOT_PORT)
 	srv_error := srv.ListenAndServe()
 	log.Fatal(srv_error)
@@ -219,8 +361,14 @@ func send_message(discord_session *dg.Session, user_id string, message string) e
 	return nil
 }
 
-func admit_user() {
-
+func broadcast_event(dg *dg.Session, info string, admin_uids [2]string) error {
+	for _, uid := range admin_uids {
+		err := send_message(dg, uid, "BROADCAST: "+info)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func write_pending_to_file(file *os.File) error {
@@ -233,11 +381,7 @@ func write_pending_to_file(file *os.File) error {
 		return err
 	}
 	for username, code_and_key := range PENDING_REGISTRATIONS {
-		_, err = fmt.Fprintf(file, "%s\x00%s\x00%s\n",
-			username,
-			code_and_key[0],
-			code_and_key[1],
-		)
+		_, err = fmt.Fprintf(file, "%s %s %s\n", username, code_and_key[0], code_and_key[1])
 		if err != nil {
 			return err
 		}
