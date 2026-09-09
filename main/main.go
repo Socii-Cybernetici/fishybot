@@ -79,8 +79,8 @@ func main() {
 		log.Println("ACCESS CODE: " + request_values["code"])
 		log.Println("SSH PUBLIC KEY: " + request_values["pubkey"])
 		PENDING_REGISTRATIONS[request_values["username"]] = [2]string{request_values["code"], request_values["pubkey"]}
-		log.Println("Added user " + request_values["username"] + " to pending list")
-		err = write_pending_to_file(pending_file)
+		log.Println("Added user \"" + request_values["username"] + "\" to pending list")
+		err = write_pending_to_file(PENDING_REGISTRATIONS, pending_file)
 		if err != nil {
 			err2 := send_message(discord_session, SPEED3_UID, "File i/o error: "+err.Error())
 			if err2 != nil {
@@ -312,7 +312,19 @@ func main() {
 				}
 				// At this point we have guaranteed success
 				delete(PENDING_REGISTRATIONS, username)
-				write_pending_to_file(pending_file)
+				err = write_pending_to_file(PENDING_REGISTRATIONS, pending_file)
+				if err != nil {
+					err2 := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: fmt.Sprintf("Failed to admit user; file i/o error: %s", err.Error()),
+						},
+					})
+					if err2 != nil {
+						log.Println("Failed to report failed admit command's file i/o error: " + err.Error())
+					}
+					return
+				}
 				err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 					Type: dg.InteractionResponseChannelMessageWithSource,
 					Data: &dg.InteractionResponseData{
@@ -320,7 +332,7 @@ func main() {
 					},
 				})
 				if err != nil {
-					log.Println("Failed to respond to admit command: ", err.Error())
+					log.Println("Failed to respond to successful admit command: ", err.Error())
 				}
 				err = broadcast_event(
 					discord_session,
@@ -371,7 +383,7 @@ func broadcast_event(dg *dg.Session, info string, admin_uids [2]string) error {
 	return nil
 }
 
-func write_pending_to_file(file *os.File) error {
+func write_pending_to_file(pending_map map[string][2]string, file *os.File) error {
 	err := file.Truncate(0)
 	if err != nil {
 		return err
@@ -380,7 +392,7 @@ func write_pending_to_file(file *os.File) error {
 	if err != nil {
 		return err
 	}
-	for username, code_and_key := range PENDING_REGISTRATIONS {
+	for username, code_and_key := range pending_map {
 		_, err = fmt.Fprintf(file, "%s %s %s\n", username, code_and_key[0], code_and_key[1])
 		if err != nil {
 			return err
