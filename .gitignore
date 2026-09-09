@@ -33,3 +33,6 @@ go.work.sum
 
 web-testing/*
 main
+Makefile
+pending.dat
+mkuser.sh
