@@ -9,21 +9,37 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 
 	dg "github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
 )
 
 var PENDING_REGISTRATIONS map[string][2]string = make(map[string][2]string)
+var TESTING_MODE bool
 
 func main() {
-	var pending_file_path string = os.Args[2]
-	var mkuser_script_path string = os.Args[3]
 	/* Load environment variables */
 	err := godotenv.Load(os.Args[1])
 	if err != nil {
 		log.Fatal(err)
 	}
+	var pending_file_path string = os.Args[2]
+	var mkuser_script_path string = os.Args[3]
+	testing_mode_flag, err := strconv.Atoi(os.Args[4])
+	if err != nil {
+		log.Fatal(err)
+	}
+	switch testing_mode_flag {
+	case 0:
+		TESTING_MODE = false
+	case 1:
+		TESTING_MODE = true
+	default:
+		log.Fatal("Invalid testing mode flag specified; use 1 or 0.\n")
+	}
+
 	var BOT_PORT string = os.Getenv("BOT_PORT")
 	var BOT_TOKEN string = os.Getenv("DISCORD_BOT_TOKEN")
 	var BOT_ID string = os.Getenv("DISCORD_BOT_ID")
@@ -72,6 +88,20 @@ func main() {
 			wr.WriteHeader(300)
 			wr.Write([]byte("Failed to parse JSON; " + err.Error()))
 			log.Println("Failed to parse JSON: " + err.Error())
+			return
+		}
+		var username_regex = regexp.MustCompile(`^[a-z][-a-z0-9_]{0,31}$`)
+		if !username_regex.MatchString(request_values["username"]) {
+			wr.WriteHeader(300)
+			wr.Write([]byte("Invalid username!"))
+			log.Println("Username failed regex check, aborting...")
+			return
+		}
+		var pubkey_regex = regexp.MustCompile(`^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) [A-Za-z0-9+/]+=* ?[^\r\n]*$`)
+		if !pubkey_regex.MatchString(request_values["pubkey"]) {
+			wr.WriteHeader(300)
+			wr.Write([]byte("Invalid public key!"))
+			log.Println("SSH public key failed regex check, aborting...")
 			return
 		}
 		log.Println("----Successful Submission----")
@@ -180,6 +210,7 @@ func main() {
 				if err != nil {
 					log.Println("Failed to respond to help command: ", err.Error())
 				}
+				log.Println("Responded to /help command triggered by " + i.Interaction.User.Username)
 				return
 			case "pending":
 				// usernames are probably <12 characters on average, plus boilerplate characters
@@ -198,6 +229,7 @@ func main() {
 				if err != nil {
 					log.Println("Failed to respond to pending command: ", err.Error())
 				}
+				log.Println("Responded to /pending command triggered by " + i.Interaction.User.Username)
 				return
 			case "info":
 				if data.Options == nil {
@@ -251,6 +283,7 @@ func main() {
 				if err != nil {
 					log.Println("Failed to respond to info command: ", err.Error())
 				}
+				log.Println("Responded to /info command for pending user \"" + username + "\" triggered by " + i.Interaction.User.Username)
 				return
 			case "admit":
 				if data.Options == nil {
@@ -294,7 +327,13 @@ func main() {
 				/*
 					Here we are going to somehow call the script to onboard a user...
 				*/
-				script := exec.Command(mkuser_script_path, username, PENDING_REGISTRATIONS[username][1])
+				var script *exec.Cmd
+				if TESTING_MODE {
+					script = exec.Command(mkuser_script_path, username, PENDING_REGISTRATIONS[username][1])
+				} else {
+					script = exec.Command("sudo", mkuser_script_path, username, PENDING_REGISTRATIONS[username][1])
+				}
+				script.Stdout = os.Stdout
 				// TODO: FIX FILE CREATION PERMISSIONS (SUDO?)
 				err = script.Run()
 				if err != nil {
@@ -306,7 +345,7 @@ func main() {
 						},
 					})
 					if err2 != nil {
-						log.Println("Failed to report failed onboarding script: ", err.Error())
+						log.Println("Failed to report failed onboarding script: ", err2.Error())
 					}
 					return
 				}
@@ -314,6 +353,7 @@ func main() {
 				delete(PENDING_REGISTRATIONS, username)
 				err = write_pending_to_file(PENDING_REGISTRATIONS, pending_file)
 				if err != nil {
+					log.Println("Failed to write pending file: " + err.Error())
 					err2 := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
 						Type: dg.InteractionResponseChannelMessageWithSource,
 						Data: &dg.InteractionResponseData{
@@ -321,7 +361,7 @@ func main() {
 						},
 					})
 					if err2 != nil {
-						log.Println("Failed to report failed admit command's file i/o error: " + err.Error())
+						log.Println("Failed to report failed admit command's file i/o error: " + err2.Error())
 					}
 					return
 				}
@@ -341,9 +381,9 @@ func main() {
 				if err != nil {
 					log.Println("Failed to broadcast admission event" + err.Error())
 				}
+				log.Println("Admitted user \"" + username + "\" with /admit triggered by " + i.Interaction.User.Username)
 				return
 			}
-
 		}
 	})
 
