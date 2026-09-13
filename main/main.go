@@ -45,7 +45,10 @@ func main() {
 	var BOT_ID string = os.Getenv("DISCORD_BOT_ID")
 	var SPEED3_UID string = os.Getenv("3SPEED_UID")
 	var NORA_UID string = os.Getenv("NORA_UID")
-	var ADMIN_BROADCAST_UIDS = [2]string{SPEED3_UID, NORA_UID}
+	var R4_UID string = os.Getenv("R4_UID")
+	var MOUNTAINLABS_UID string = os.Getenv("MOUNTAINLABS_UID")
+	var NARROWAPPLE_UID string = os.Getenv("NARROWAPPLE_UID")
+	var ADMIN_BROADCAST_UIDS = []string{NORA_UID, SPEED3_UID, R4_UID, MOUNTAINLABS_UID, NARROWAPPLE_UID}
 
 	discord_session, err := dg.New("Bot " + BOT_TOKEN)
 	if err != nil {
@@ -66,7 +69,10 @@ func main() {
 	for userinfo, err := reader.ReadString('\n'); err != io.EOF; userinfo, err = reader.ReadString('\n') {
 		var code_and_key [2]string
 		var username string
-		fmt.Sscanf(userinfo, "%s %s %s\n", &username, &code_and_key[0], &code_and_key[1])
+		_, err := fmt.Sscanf(userinfo, "%s %s %s\n", &username, &code_and_key[0], &code_and_key[1])
+		if err != nil {
+			// log.Fatal("Failed to read from pending file: " + err.Error())
+		}
 		PENDING_REGISTRATIONS[username] = code_and_key
 	}
 
@@ -126,10 +132,7 @@ func main() {
 				"SSH Public Key:\n"+request_values["pubkey"],
 			ADMIN_BROADCAST_UIDS)
 		if err != nil {
-			wr.WriteHeader(500)
-			wr.Write([]byte("Failed to reach discord API; " + err.Error()))
-			log.Println("Could not reach discord api for this request;" + err.Error())
-			return
+			log.Println("Failed to broadcast submission event;" + err.Error())
 		}
 		wr.Write([]byte("Submission received:\n" + string(body)))
 		log.Println("Submission received:\n" + string(body))
@@ -147,7 +150,7 @@ func main() {
 		log.Fatal("Failed to register help command: " + err.Error())
 	}
 	_, err = discord_session.ApplicationCommandCreate(BOT_ID, "", &dg.ApplicationCommand{
-		ID:            "1",
+		ID:            "2",
 		Type:          dg.ChatApplicationCommand,
 		ApplicationID: BOT_ID,
 		Name:          "pending",
@@ -157,7 +160,7 @@ func main() {
 		log.Fatal("Failed to register pending command: " + err.Error())
 	}
 	_, err = discord_session.ApplicationCommandCreate(BOT_ID, "", &dg.ApplicationCommand{
-		ID:            "2",
+		ID:            "3",
 		Type:          dg.ChatApplicationCommand,
 		ApplicationID: BOT_ID,
 		Name:          "info",
@@ -174,7 +177,7 @@ func main() {
 		log.Fatal("Failed to register info command: " + err.Error())
 	}
 	_, err = discord_session.ApplicationCommandCreate(BOT_ID, "", &dg.ApplicationCommand{
-		ID:            "2",
+		ID:            "4",
 		Type:          dg.ChatApplicationCommand,
 		ApplicationID: BOT_ID,
 		Name:          "admit",
@@ -190,6 +193,24 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to register admit command: " + err.Error())
 	}
+	_, err = discord_session.ApplicationCommandCreate(BOT_ID, "", &dg.ApplicationCommand{
+		ID:            "5",
+		Type:          dg.ChatApplicationCommand,
+		ApplicationID: BOT_ID,
+		Name:          "deny",
+		Description:   "Deny a currently pending applicant",
+		Options: []*dg.ApplicationCommandOption{
+			{
+				Type:        dg.ApplicationCommandOptionString,
+				Name:        "username",
+				Description: "username of user to select",
+			},
+		},
+	})
+	if err != nil {
+		log.Fatal("Failed to register deny command: " + err.Error())
+	}
+
 	/* Handle discord gateway interactions from slash commands */
 	discord_session.AddHandler(func(s *dg.Session, i *dg.InteractionCreate) {
 		switch i.Interaction.Type {
@@ -203,8 +224,9 @@ func main() {
 						Content: "List of commands:\n" +
 							"/help - show this message\n" +
 							"/pending - list pending users\n" +
-							"/info USERNAME - show info for a user\n" +
-							"/admit USERNAME - admit pending user",
+							"/info USERNAME - show info for pending user\n" +
+							"/admit USERNAME - admit pending user\n" +
+							"/deny USERNAME - deny pending user",
 					},
 				})
 				if err != nil {
@@ -212,6 +234,7 @@ func main() {
 				}
 				log.Println("Responded to /help command triggered by " + i.Interaction.User.Username)
 				return
+
 			case "pending":
 				// usernames are probably <12 characters on average, plus boilerplate characters
 				content := make([]byte, 16*len(PENDING_REGISTRATIONS))
@@ -231,6 +254,7 @@ func main() {
 				}
 				log.Println("Responded to /pending command triggered by " + i.Interaction.User.Username)
 				return
+
 			case "info":
 				if data.Options == nil {
 					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
@@ -285,6 +309,7 @@ func main() {
 				}
 				log.Println("Responded to /info command for pending user \"" + username + "\" triggered by " + i.Interaction.User.Username)
 				return
+
 			case "admit":
 				if data.Options == nil {
 					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
@@ -324,9 +349,7 @@ func main() {
 				if err != nil {
 					log.Println("Failed to respond to admission command failure: ", err.Error())
 				}
-				/*
-					Here we are going to somehow call the script to onboard a user...
-				*/
+				/* Call user onboarding script */
 				var script *exec.Cmd
 				if TESTING_MODE {
 					script = exec.Command(mkuser_script_path, username, PENDING_REGISTRATIONS[username][1])
@@ -334,7 +357,6 @@ func main() {
 					script = exec.Command("sudo", mkuser_script_path, username, PENDING_REGISTRATIONS[username][1])
 				}
 				script.Stdout = os.Stdout
-				// TODO: FIX FILE CREATION PERMISSIONS (SUDO?)
 				err = script.Run()
 				if err != nil {
 					log.Println("User onboarding script failed: " + err.Error())
@@ -383,7 +405,69 @@ func main() {
 				}
 				log.Println("Admitted user \"" + username + "\" with /admit triggered by " + i.Interaction.User.Username)
 				return
+
+			case "deny":
+				if data.Options == nil {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "No username provided!",
+						},
+					})
+					if err != nil {
+						log.Println("Failed to report malformed deny command: ", err.Error())
+					}
+					return
+				}
+				_username := data.GetOption("username").Value
+				username, ok := _username.(string)
+				if !ok {
+					err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: "Invalid option type!",
+						},
+					})
+					if err != nil {
+						log.Println("Failed to report malformed deny command: ", err.Error())
+					}
+					return
+				}
+				delete(PENDING_REGISTRATIONS, username)
+				err = write_pending_to_file(PENDING_REGISTRATIONS, pending_file)
+				if err != nil {
+					log.Println("Failed to write pending file: " + err.Error())
+					err2 := s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+						Type: dg.InteractionResponseChannelMessageWithSource,
+						Data: &dg.InteractionResponseData{
+							Content: fmt.Sprintf("Failed to deny user; file i/o error: %s", err.Error()),
+						},
+					})
+					if err2 != nil {
+						log.Println("Failed to report failed deny command's file i/o error: " + err2.Error())
+					}
+					return
+				}
+				err = s.InteractionRespond(i.Interaction, &dg.InteractionResponse{
+					Type: dg.InteractionResponseChannelMessageWithSource,
+					Data: &dg.InteractionResponseData{
+						Content: fmt.Sprintf("User %s successfully denied by command.", username),
+					},
+				})
+				if err != nil {
+					log.Println("Failed to respond to successful deny command: ", err.Error())
+				}
+				err = broadcast_event(
+					discord_session,
+					fmt.Sprintf("User \"%s\" denied by %s.", username, i.Interaction.User.Username),
+					ADMIN_BROADCAST_UIDS)
+				if err != nil {
+					log.Println("Failed to broadcast denial event" + err.Error())
+				}
+				log.Println("Denied user \"" + username + "\" with /deny triggered by " + i.Interaction.User.Username)
+				return
 			}
+
 		}
 	})
 
@@ -392,11 +476,11 @@ func main() {
 		log.Fatal(err.Error())
 	}
 
-	var srv http.Server = http.Server{
+	var srv = http.Server{
 		Addr:    ":" + BOT_PORT,
 		Handler: srv_handler,
 	}
-	log.Printf("Listening on port %s", BOT_PORT)
+	log.Printf("Listening on port %s\n", BOT_PORT)
 	srv_error := srv.ListenAndServe()
 	log.Fatal(srv_error)
 }
@@ -413,7 +497,7 @@ func send_message(discord_session *dg.Session, user_id string, message string) e
 	return nil
 }
 
-func broadcast_event(dg *dg.Session, info string, admin_uids [2]string) error {
+func broadcast_event(dg *dg.Session, info string, admin_uids []string) error {
 	for _, uid := range admin_uids {
 		err := send_message(dg, uid, "BROADCAST: "+info)
 		if err != nil {
